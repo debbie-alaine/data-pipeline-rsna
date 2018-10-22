@@ -44,15 +44,13 @@ import label_map_util
 
 import tensorflow as tf
 
-flags.DEFINE_string('train_image_dir', '', 'Training image directory.')
-flags.DEFINE_string('val_image_dir', '', 'Validation image directory.')
-flags.DEFINE_string('test_image_dir', '', 'Test image directory.')
-flags.DEFINE_string('train_object_annotations_file', '', '')
-flags.DEFINE_string('val_object_annotations_file', '', '')
-flags.DEFINE_string('train_caption_annotations_file', '', '')
-flags.DEFINE_string('val_caption_annotations_file', '', '')
-flags.DEFINE_string('testdev_annotations_file', '',
-                    'Test-dev annotations JSON file.')
+flags.DEFINE_string('train_image_dir', './generated_images', 'Training image directory.')
+flags.DEFINE_string('val_image_dir', './stage_1_validation_images', 'Validation image directory.')
+flags.DEFINE_string('test_image_dir', './generated_images/shift_image', 'Test image directory.')
+flags.DEFINE_string('train_object_annotations_file', './object_annotation.json', '')
+flags.DEFINE_string('val_object_annotations_file', './validation_object_annotation.json', '')
+flags.DEFINE_string('train_caption_annotations_file', './caption_annotation.json', '')
+flags.DEFINE_string('val_caption_annotations_file', './validation_annotation.json', '')
 flags.DEFINE_string('output_dir', '/tmp/', 'Output data directory.')
 
 FLAGS = flags.FLAGS
@@ -178,48 +176,37 @@ def _pool_create_tf_example(args):
 
 # bounding box annotations
 def _load_object_annotations(object_annotations_file):
+    tf.logging.info('Building object index.')
     with tf.gfile.GFile(object_annotations_file, 'r') as fid:
-        obj_annotations = json.load(fid)
+        img_to_obj_annotation = json.load(fid)
 
-    images = obj_annotations['images']
-    category_index = label_map_util.create_category_index(
-        obj_annotations['categories'])
+    category_index = label_map_util.create_category_index()
 
-    img_to_obj_annotation = collections.defaultdict(list)
-    tf.logging.info('Building bounding box index.')
-    for annotation in obj_annotations['annotations']:
-        image_id = annotation['patientId']
-        img_to_obj_annotation[image_id].append(annotation)
-
-    missing_annotation_count = 0
-    for image in images:
-        image_id = image['id']
-        if image_id not in img_to_obj_annotation:
-            missing_annotation_count += 1
-
-    tf.logging.info('%d images are missing bboxes.', missing_annotation_count)
+    images = []
+    for patientId in img_to_obj_annotation:
+        if patientId.endswith("1"):
+            directory = "shift_image"
+        elif patientId.endswith("2"):
+            directory = "shift_bbox"
+        elif patientId.endswith("3"):
+            directory = "scale_bbox"
+        elif patientId.endswith("4"):
+            directory = "scale_image"
+        elif patientId.endswith("5"):
+            directory = "scale_shift_bbox"
+        elif patientId.endswith("6"):
+            directory = "shift_image_shift_bbox"
+        else:
+            directory = "scale_image_scale_shift_bbox"
+        images.append({'height': 1024, 'width': 1024, 'id': patientId, 'file_name': "{}/{}.png".format(directory, patientId)})
 
     return images, img_to_obj_annotation, category_index
 
 
 def _load_caption_annotations(caption_annotations_file):
-    with tf.gfile.GFile(caption_annotations_file, 'r') as fid:
-        caption_annotations = json.load(fid)
-
-    img_to_caption_annotation = collections.defaultdict(list)
     tf.logging.info('Building caption index.')
-    for annotation in caption_annotations['annotations']:
-        image_id = annotation['image_id']
-        img_to_caption_annotation[image_id].append(annotation)
-
-    missing_annotation_count = 0
-    images = caption_annotations['images']
-    for image in images:
-        image_id = image['id']
-        if image_id not in img_to_caption_annotation:
-            missing_annotation_count += 1
-
-    tf.logging.info('%d images are missing captions.', missing_annotation_count)
+    with tf.gfile.GFile(caption_annotations_file, 'r') as fid:
+        img_to_caption_annotation = json.load(fid)
 
     return img_to_caption_annotation
 
@@ -283,7 +270,6 @@ def main(_):
         tf.gfile.MakeDirs(FLAGS.output_dir)
     train_output_path = os.path.join(FLAGS.output_dir, 'train')
     val_output_path = os.path.join(FLAGS.output_dir, 'val')
-    testdev_output_path = os.path.join(FLAGS.output_dir, 'test-dev')
 
     _create_tf_record_from_rsna_annotations(
         FLAGS.train_object_annotations_file,

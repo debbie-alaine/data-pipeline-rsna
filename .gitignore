@@ -7,5 +7,9 @@ training_data/
 .idea/
 caption_annotation.json
 object_annotation.json
+validation_caption_annotation.json
+validation_object_annotation.json
 stage_1_train_labels.csv
 .gitignore~
+__pycache__/
+data/

@@ -36,7 +36,7 @@ def _validate_label_map(label_map):
             raise ValueError('Label map id 0 is reserved for the background label')
 
 
-def create_category_index(categories):
+def create_category_index():
     """Creates dictionary of COCO compatible categories keyed by category id.
   Args:
     categories: a list of dicts, each of which has the following keys:
@@ -47,9 +47,7 @@ def create_category_index(categories):
     category_index: a dict containing the same entries as categories, but keyed
       by the 'id' field of each category.
   """
-    category_index = {}
-    for cat in categories:
-        category_index[cat['id']] = cat
+    category_index = {1: {"id": 1, "name": "pneumonia"}, 0: {"id": 0, "name": "not pneumonia"}}
     return category_index
 
 

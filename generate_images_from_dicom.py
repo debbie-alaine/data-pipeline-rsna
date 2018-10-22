@@ -51,6 +51,59 @@ def dicom_to_array(ds):
     return image_array
 
 
+def split_images(input_dir, validation_dir, training_images_dir, caption_map, box_map):
+    val_caption_json = "./validation_caption_annotation.json"
+    val_object_json = "./validation_object_annotation.json"
+
+    if os.path.exists(validation_dir):
+        shutil.rmtree(validation_dir)
+
+    os.mkdir(validation_dir)
+
+    if os.path.exists(training_images_dir):
+        shutil.rmtree(training_images_dir)
+
+    os.mkdir(training_images_dir)
+
+    val_object_map = {}
+    val_caption_map = {}
+
+    total_images = len([name for name in os.listdir(input_dir)])
+    training_size = round(total_images * .80)
+
+    index = 0
+    for file in os.listdir(input_dir):
+        if file.endswith(".dcm"):
+            patient_id = file.replace(".dcm", "")
+            if index < training_size - 1:
+                array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
+                misc.imsave("{}/{}.png".format(training_images_dir, patient_id), array)
+            else:
+                array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
+                misc.imsave("{}/{}.png".format(validation_directory, patient_id), array)
+                val_object_map[patient_id] = box_map[patient_id]
+                val_caption_map[patient_id] = caption_map[patient_id]
+
+        index += 1
+
+    if os.path.exists(val_caption_json):
+        os.remove(val_caption_json)
+
+    with open(val_caption_json, 'w') as outfile:
+        json.dump(val_caption_map, outfile)
+
+    if os.path.exists(val_object_json):
+        os.remove(val_object_json)
+
+    with open(val_object_json, 'w') as outfile:
+        json.dump(val_object_map, outfile)
+
+    total_validation_images = len([name for name in os.listdir(validation_directory)])
+    print("{} images moved to validation directory".format(total_validation_images))
+    print("Total in Validation Captions Annotation JSON: {}".format(len(val_caption_map)))
+    print("Total in Validation Object Annotation JSON: {}\n".format(len(val_object_map)))
+
+
 def plot_image_and_bounding_boxes(image_array, boxes):
     pyplot.set_cmap(pyplot.gray())
     pyplot.imshow(image_array)
@@ -99,14 +152,15 @@ def shift_bbox(x, y, image_array, box_list):
             rx = random.randint(-x, x)
             ry = random.randint(-y, y)
 
+        box = np.copy(image_copy[y0:y0 + h, x0:x0 + w])
+        image_copy[y0:y0 + h, x0:x0 + w].fill(0)
+
         inside_fns = [partial(inside, x1, y1, w1, h1) for (idx2, [x1, y1, w1, h1]) in enumerate(box_list) if
                       idx != idx2]
         if np.any(
-                [np.any([inside_fn(x0 + rx, y0 + ry), inside_fn(x0 + w + rx, y0 + ry), inside_fn(x0 + rx, y0 + h + ry),
-                         inside_fn(x0 + w + rx, y0 + h + ry)]) for inside_fn in inside_fns]):
+                [np.any([inside_fn(x0 + rx, y0 + ry), inside_fn(x0 + box.shape[1] + rx, y0 + ry), inside_fn(x0 + rx, y0 + box.shape[0] + ry),
+                         inside_fn(x0 + box.shape[1] + rx, y0 + box.shape[0] + ry)]) for inside_fn in inside_fns]):
             continue
-        box = np.copy(image_copy[y0:y0 + h, x0:x0 + w])
-        image_copy[y0:y0 + h, x0:x0 + w].fill(0)
 
         image_copy[(y0 + ry):(box.shape[0] + y0 + ry), (x0 + rx):(box.shape[1] + x0 + rx)] = box
         # image_copy[(y0 + ry):(y0 + h + ry), (x0 + rx):(x0 + w + rx)] = box
@@ -201,8 +255,10 @@ def scale_image(factor, image_array, box_list):
 if __name__ == "__main__":
     warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 
+    input_dir = "./data"
+    validation_directory = "./stage_1_validation_images"
     training_images_dir = "./stage_1_train_images"
-    training_lables = "./stage_1_train_labels.csv"
+    training_labels = "./stage_1_train_labels.csv"
 
     generated_image_dir = "./generated_images"
 
@@ -215,7 +271,9 @@ if __name__ == "__main__":
 
     print("Creating dictionary of bounding boxes and captions...\n")
     # create dictionary of bounding boxes for each patient id
-    box_map, caption_map = create_maps(training_lables)
+    box_map, caption_map = create_maps(training_labels)
+
+    split_images(input_dir, validation_directory, training_images_dir, caption_map, box_map)
 
     final_box_map = defaultdict(lambda: [])
     final_captions_map = defaultdict(lambda: [])
@@ -231,22 +289,22 @@ if __name__ == "__main__":
     os.mkdir(shift_image_dir)
 
     print("Running shift image operation: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
 
             for x in range(0, 5):
                 shifted_array, shifted_box_list = shift_image(10, 10, array, box_map[patient_id])
-                shifted_patient_id = "{}-shift-{}".format(patient_id, x)
+                shifted_patient_id = "{}-shift-{}-1".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(shift_image_dir, shifted_patient_id), shifted_array)
                 final_box_map[shifted_patient_id] = shifted_box_list
                 final_captions_map[shifted_patient_id] = caption_map[patient_id]
                 # plot_image_and_bounding_boxes(shifted_array, shifted_box_list)
                 # flip shifted image and save
                 flipped_shift_array, flipped_shift_box_list = flip_image(shifted_array, shifted_box_list)
-                flipped_patient_id = "{}-shift-flipped-{}".format(patient_id, x)
+                flipped_patient_id = "{}-shift-flipped-{}-1".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(shift_image_dir, flipped_patient_id), flipped_shift_array)
                 final_box_map[flipped_patient_id] = flipped_shift_box_list
                 final_captions_map[flipped_patient_id] = caption_map[patient_id]
@@ -266,18 +324,18 @@ if __name__ == "__main__":
     os.mkdir(shift_bbox_dir)
 
     print("Running shift bounding box operation: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # check that bounding boxes exist for image
             if box_map[patient_id]:
                 # read dicom file and convert to numpy array
-                array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+                array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
 
                 if box_map[patient_id]:
                     for x in range(0, 25):
                         shifted_bbox_array, shifted_bbox_box_list = shift_bbox(50, 50, array, box_map[patient_id])
-                        shifted_bbox_patient_id = "{}-shift-bbox-{}".format(patient_id, x)
+                        shifted_bbox_patient_id = "{}-shift-bbox-{}-2".format(patient_id, x)
                         misc.imsave("{}/{}.png".format(shift_bbox_dir, shifted_bbox_patient_id), shifted_bbox_array)
                         final_box_map[shifted_bbox_patient_id] = shifted_bbox_box_list
                         final_captions_map[shifted_bbox_patient_id] = caption_map[patient_id]
@@ -285,7 +343,7 @@ if __name__ == "__main__":
                         # flip image and save
                         flipped_bbox_shift_array, flipped_bbox_shift_box_list = flip_image(shifted_bbox_array,
                                                                                            shifted_bbox_box_list)
-                        flipped_bbox_patient_id = "{}-shift-bbox-flipped-{}".format(patient_id, x)
+                        flipped_bbox_patient_id = "{}-shift-bbox-flipped-{}-2".format(patient_id, x)
                         misc.imsave("{}/{}.png".format(shift_bbox_dir, flipped_bbox_patient_id),
                                     flipped_bbox_shift_array)
                         final_box_map[flipped_bbox_patient_id] = flipped_bbox_shift_box_list
@@ -306,15 +364,15 @@ if __name__ == "__main__":
     os.mkdir(scale_bbox_dir)
 
     print("Running scale bounding box operation: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
             if box_map[patient_id]:
                 for x in range(0, 25):
                     scale_bbox_array, scale_bbox_box_list = scale_bbox(.25, array, box_map[patient_id])
-                    scale_bbox_patient_id = "{}-scale-bbox-{}".format(patient_id, x)
+                    scale_bbox_patient_id = "{}-scale-bbox-{}-3".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_bbox_dir, scale_bbox_patient_id), scale_bbox_array)
                     final_box_map[scale_bbox_patient_id] = scale_bbox_box_list
                     final_captions_map[scale_bbox_patient_id] = caption_map[patient_id]
@@ -323,7 +381,7 @@ if __name__ == "__main__":
                     # flip image and save
                     flipped_scale_bbox_array, flipped_scale_bbox_box_list = flip_image(scale_bbox_array,
                                                                                        scale_bbox_box_list)
-                    flipped_scale_bbox_patient_id = "{}-scale-bbox-flipped-{}".format(patient_id, x)
+                    flipped_scale_bbox_patient_id = "{}-scale-bbox-flipped-{}-3".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_bbox_dir, flipped_scale_bbox_patient_id),
                                 flipped_scale_bbox_array)
                     final_box_map[flipped_scale_bbox_patient_id] = flipped_scale_bbox_box_list
@@ -344,15 +402,15 @@ if __name__ == "__main__":
     os.mkdir(scale_image_dir)
 
     print("Running scale image operation: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
 
             for x in range(0, 5):
                 scale_image_array, scale_image_box_list = scale_image(.0625, array, box_map[patient_id])
-                scale_image_patient_id = "{}-scale-image-{}".format(patient_id, x)
+                scale_image_patient_id = "{}-scale-image-{}-4".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(scale_image_dir, scale_image_patient_id), scale_image_array)
                 final_box_map[scale_image_patient_id] = scale_image_box_list
                 final_captions_map[scale_image_patient_id] = caption_map[patient_id]
@@ -361,7 +419,7 @@ if __name__ == "__main__":
                 # flip image and save
                 flipped_scale_image_array, flipped_scale_image_box_list = flip_image(scale_image_array,
                                                                                      scale_image_box_list)
-                flipped_scale_image_patient_id = "{}-scale-image-flipped-{}".format(patient_id, x)
+                flipped_scale_image_patient_id = "{}-scale-image-flipped-{}-4".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(scale_image_dir, flipped_scale_image_patient_id),
                             flipped_scale_image_array)
                 final_box_map[flipped_scale_image_patient_id] = flipped_scale_image_box_list
@@ -383,17 +441,17 @@ if __name__ == "__main__":
     os.mkdir(scale_shift_bbox_dir)
 
     print("Running scale and shift bounding box operations: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
             if box_map[patient_id]:
                 for x in range(0, 25):
                     scale_bbox_array, scale_bbox_box_list = scale_bbox(.25, array, box_map[patient_id])
                     scale_shift_bbox_array, scale_shift_bbox_box_list = shift_bbox(50, 50, scale_bbox_array,
                                                                                    scale_bbox_box_list);
-                    scale_shift_bbox_patient_id = "{}-scale-shift-bbox-{}".format(patient_id, x)
+                    scale_shift_bbox_patient_id = "{}-scale-shift-bbox-{}-5".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_shift_bbox_dir, scale_shift_bbox_patient_id),
                                 scale_shift_bbox_array)
                     final_box_map[scale_shift_bbox_patient_id] = scale_bbox_box_list
@@ -403,7 +461,7 @@ if __name__ == "__main__":
                     # flip image and save
                     flipped_scale_bbox_array, flipped_scale_shift_box_box_list = flip_image(scale_shift_bbox_array,
                                                                                             scale_shift_bbox_box_list)
-                    flipped_scale_shift_bbox_patient_id = "{}-scale-shift-bbox-flipped-{}".format(patient_id, x)
+                    flipped_scale_shift_bbox_patient_id = "{}-scale-shift-bbox-flipped-{}-5".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_shift_bbox_dir, flipped_scale_shift_bbox_patient_id),
                                 flipped_scale_bbox_array)
                     final_box_map[flipped_scale_shift_bbox_patient_id] = flipped_scale_shift_box_box_list
@@ -425,17 +483,17 @@ if __name__ == "__main__":
     os.mkdir(shift_image_shift_bbox_dir)
 
     print("Running shift image and shift bbox operation: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
 
             if box_map[patient_id]:
                 for x in range(0, 5):
                     shifted_array, shifted_box_list = shift_image(10, 10, array, box_map[patient_id])
                     shift_shift_array, shift_shift_box_list = shift_bbox(50, 50, shifted_array, shifted_box_list)
-                    shift_shift_patient_id = "{}-shift-shift-{}".format(patient_id, x)
+                    shift_shift_patient_id = "{}-shift-shift-{}-6".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, shift_shift_patient_id),
                                 shift_shift_array)
                     final_box_map[shift_shift_patient_id] = shift_shift_box_list
@@ -445,7 +503,7 @@ if __name__ == "__main__":
                     # flip shifted image and save
                     flipped_shift_shift_array, flipped_shift_shift_box_list = flip_image(shift_shift_array,
                                                                                          shift_shift_box_list)
-                    flipped_patient_id = "{}-shift-shift-flipped-{}".format(patient_id, x)
+                    flipped_patient_id = "{}-shift-shift-flipped-{}-6".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, flipped_patient_id),
                                 flipped_shift_shift_array)
                     final_box_map[flipped_patient_id] = flipped_shift_shift_box_list
@@ -467,11 +525,11 @@ if __name__ == "__main__":
     os.mkdir(scale_image_scale_shift_bbox_dir)
 
     print("Running scale image and scale and shift bounding box operations: ")
-    for file in os.listdir(training_images_dir):
+    for file in os.listdir(input_dir):
         if file.endswith(".dcm"):
             patient_id = file.replace(".dcm", "")
             # read dicom file and convert to numpy array
-            array = dicom_to_array(read_dicom_files("{}/{}".format(training_images_dir, file)))
+            array = dicom_to_array(read_dicom_files("{}/{}".format(input_dir, file)))
             if box_map[patient_id]:
                 for x in range(0, 5):
                     scale_image_array, scale_image_bbox_list = scale_image(0.625, array, box_map[patient_id])
@@ -480,7 +538,7 @@ if __name__ == "__main__":
                     scale_scale_shift_bbox_array, scale_scale_shift_bbox_list = shift_bbox(50, 50,
                                                                                            scale_scale_bbox_array,
                                                                                            scale_scale_bbox_list)
-                    scale_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-{}".format(patient_id, x)
+                    scale_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-{}-7".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_image_scale_shift_bbox_dir, scale_scale_shift_bbox_patient_id),
                                 scale_scale_shift_bbox_array)
                     final_box_map[scale_scale_shift_bbox_patient_id] = scale_scale_shift_bbox_list
@@ -491,7 +549,7 @@ if __name__ == "__main__":
                     flipped_scale_bbox_array, flipped_scale_shift_box_box_list = flip_image(
                         scale_scale_shift_bbox_array,
                         scale_scale_shift_bbox_list)
-                    flipped_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-flipped-{}".format(patient_id, x)
+                    flipped_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-flipped-{}-7".format(patient_id, x)
                     misc.imsave(
                         "{}/{}.png".format(scale_image_scale_shift_bbox_dir, flipped_scale_shift_bbox_patient_id),
                         flipped_scale_bbox_array)
@@ -510,6 +568,9 @@ if __name__ == "__main__":
 
     with open(object_annotation, 'w') as outfile:
         json.dump(final_box_map, outfile)
+
+    if os.path.exists(caption_annotation):
+        os.remove(caption_annotation)
 
     with open(caption_annotation, 'w') as outfile:
         json.dump(final_captions_map, outfile)
