@@ -39,7 +39,7 @@ from absl import flags
 import numpy as np
 import PIL.Image
 
-from pycocotools import mask
+# from pycocotools import mask
 import dataset_util
 import label_map_util
 
@@ -136,16 +136,16 @@ def create_tf_example(image,
     category_names.append(category_index[category_id]['name'].encode('utf8'))
     area.append(object_annotations['area'])
 
-    if include_masks:
-      run_len_encoding = mask.frPyObjects(object_annotations['segmentation'],
-                                          image_height, image_width)
-      binary_mask = mask.decode(run_len_encoding)
-      if not object_annotations['iscrowd']:
-        binary_mask = np.amax(binary_mask, axis=2)
-      pil_image = PIL.Image.fromarray(binary_mask)
-      output_io = io.BytesIO()
-      pil_image.save(output_io, format='PNG')
-      encoded_mask_png.append(output_io.getvalue())
+    # if include_masks:
+    #   run_len_encoding = mask.frPyObjects(object_annotations['segmentation'],
+    #                                       image_height, image_width)
+    #   binary_mask = mask.decode(run_len_encoding)
+    #   if not object_annotations['iscrowd']:
+    #     binary_mask = np.amax(binary_mask, axis=2)
+    #   pil_image = PIL.Image.fromarray(binary_mask)
+    #   output_io = io.BytesIO()
+    #   pil_image.save(output_io, format='PNG')
+    #   encoded_mask_png.append(output_io.getvalue())
 
   captions = []
   for caption_annotation in caption_annotations:
