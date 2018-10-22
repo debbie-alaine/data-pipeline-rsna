@@ -11,8 +11,11 @@ import os
 import warnings
 import json
 
-def create_bounding_box_map(filepath):
+
+def create_maps(filepath):
     box_map = defaultdict(lambda: [])
+
+    captions_map = defaultdict(lambda: [])
 
     with open(filepath, 'r') as csvfile:
         csv_reader = csv.reader(csvfile, delimiter=',')
@@ -29,11 +32,13 @@ def create_bounding_box_map(filepath):
             if int(target):
                 box_map[patient_id].append([int(float(a)) for a in [x, y, width, height]])
 
+            captions_map[patient_id].append(target)
+
         ## Print Map
         # for patient_id in box_map:
         #     print(patient_id + ": " + str(box_map[patient_id]))
 
-        return box_map
+        return box_map, captions_map
 
 
 def read_dicom_files(dicom_path):
@@ -103,9 +108,10 @@ def shift_bbox(x, y, image_array, box_list):
         box = np.copy(image_copy[y0:y0 + h, x0:x0 + w])
         image_copy[y0:y0 + h, x0:x0 + w].fill(0)
 
-        image_copy[(y0 + ry):(y0 + h + ry), (x0 + rx):(x0 + w + rx)] = box
+        image_copy[(y0 + ry):(box.shape[0] + y0 + ry), (x0 + rx):(box.shape[1] + x0 + rx)] = box
+        # image_copy[(y0 + ry):(y0 + h + ry), (x0 + rx):(x0 + w + rx)] = box
 
-        shifted_bbox_list.append([x0 + rx, y0 + ry, w, h])
+        shifted_bbox_list.append([x0 + rx, y0 + ry, box.shape[1], box.shape[0]])
     return image_copy, shifted_bbox_list
 
 
@@ -195,8 +201,8 @@ def scale_image(factor, image_array, box_list):
 if __name__ == "__main__":
     warnings.filterwarnings('ignore', '.*output shape of zoom.*')
 
-    training_images_dir = "./training_data_test"
-    training_bounding_boxes = "./stage_1_train_labels.csv"
+    training_images_dir = "./stage_1_train_images"
+    training_lables = "./stage_1_train_labels.csv"
 
     generated_image_dir = "./generated_images"
 
@@ -205,12 +211,14 @@ if __name__ == "__main__":
 
     os.mkdir(generated_image_dir)
 
-    # create dictionary of bounding boxes for each patient id
-    box_map = create_bounding_box_map(training_bounding_boxes)
-    print("Creating dictionary of bounding boxes...\n")
+    total_images_generated = 0
 
-    # new box map for generated images
+    print("Creating dictionary of bounding boxes and captions...\n")
+    # create dictionary of bounding boxes for each patient id
+    box_map, caption_map = create_maps(training_lables)
+
     final_box_map = defaultdict(lambda: [])
+    final_captions_map = defaultdict(lambda: [])
 
     ###################
     ### SHIFT IMAGE ###
@@ -234,15 +242,17 @@ if __name__ == "__main__":
                 shifted_patient_id = "{}-shift-{}".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(shift_image_dir, shifted_patient_id), shifted_array)
                 final_box_map[shifted_patient_id] = shifted_box_list
+                final_captions_map[shifted_patient_id] = caption_map[patient_id]
                 # plot_image_and_bounding_boxes(shifted_array, shifted_box_list)
                 # flip shifted image and save
                 flipped_shift_array, flipped_shift_box_list = flip_image(shifted_array, shifted_box_list)
                 flipped_patient_id = "{}-shift-flipped-{}".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(shift_image_dir, flipped_patient_id), flipped_shift_array)
                 final_box_map[flipped_patient_id] = flipped_shift_box_list
-
+                final_captions_map[flipped_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(shift_image_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, shift_image_dir))
 
     ##########################
@@ -270,15 +280,19 @@ if __name__ == "__main__":
                         shifted_bbox_patient_id = "{}-shift-bbox-{}".format(patient_id, x)
                         misc.imsave("{}/{}.png".format(shift_bbox_dir, shifted_bbox_patient_id), shifted_bbox_array)
                         final_box_map[shifted_bbox_patient_id] = shifted_bbox_box_list
+                        final_captions_map[shifted_bbox_patient_id] = caption_map[patient_id]
                         # plot_image_and_bounding_boxes(shifted_bbox_array, shifted_bbox_box_list)
                         # flip image and save
                         flipped_bbox_shift_array, flipped_bbox_shift_box_list = flip_image(shifted_bbox_array,
                                                                                            shifted_bbox_box_list)
                         flipped_bbox_patient_id = "{}-shift-bbox-flipped-{}".format(patient_id, x)
-                        misc.imsave("{}/{}.png".format(shift_bbox_dir, flipped_bbox_patient_id), flipped_bbox_shift_array)
+                        misc.imsave("{}/{}.png".format(shift_bbox_dir, flipped_bbox_patient_id),
+                                    flipped_bbox_shift_array)
                         final_box_map[flipped_bbox_patient_id] = flipped_bbox_shift_box_list
+                        final_captions_map[flipped_bbox_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(shift_bbox_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, shift_bbox_dir))
 
     ##########################
@@ -303,6 +317,8 @@ if __name__ == "__main__":
                     scale_bbox_patient_id = "{}-scale-bbox-{}".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_bbox_dir, scale_bbox_patient_id), scale_bbox_array)
                     final_box_map[scale_bbox_patient_id] = scale_bbox_box_list
+                    final_captions_map[scale_bbox_patient_id] = caption_map[patient_id]
+
                     # plot_image_and_bounding_boxes(scale_bbox_array, scale_bbox_box_list)
                     # flip image and save
                     flipped_scale_bbox_array, flipped_scale_bbox_box_list = flip_image(scale_bbox_array,
@@ -311,8 +327,10 @@ if __name__ == "__main__":
                     misc.imsave("{}/{}.png".format(scale_bbox_dir, flipped_scale_bbox_patient_id),
                                 flipped_scale_bbox_array)
                     final_box_map[flipped_scale_bbox_patient_id] = flipped_scale_bbox_box_list
+                    final_captions_map[flipped_scale_bbox_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(scale_bbox_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, scale_bbox_dir))
 
     ##################
@@ -337,6 +355,8 @@ if __name__ == "__main__":
                 scale_image_patient_id = "{}-scale-image-{}".format(patient_id, x)
                 misc.imsave("{}/{}.png".format(scale_image_dir, scale_image_patient_id), scale_image_array)
                 final_box_map[scale_image_patient_id] = scale_image_box_list
+                final_captions_map[scale_image_patient_id] = caption_map[patient_id]
+
                 # plot_image_and_bounding_boxes(scale_image_array, scale_image_box_list)
                 # flip image and save
                 flipped_scale_image_array, flipped_scale_image_box_list = flip_image(scale_image_array,
@@ -345,10 +365,11 @@ if __name__ == "__main__":
                 misc.imsave("{}/{}.png".format(scale_image_dir, flipped_scale_image_patient_id),
                             flipped_scale_image_array)
                 final_box_map[flipped_scale_image_patient_id] = flipped_scale_image_box_list
+                final_captions_map[flipped_scale_image_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(scale_image_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, scale_image_dir))
-
 
     #########################
     ## SCALE & SHIFT BBOXES #
@@ -370,20 +391,26 @@ if __name__ == "__main__":
             if box_map[patient_id]:
                 for x in range(0, 25):
                     scale_bbox_array, scale_bbox_box_list = scale_bbox(.25, array, box_map[patient_id])
-                    scale_shift_bbox_array, scale_shift_bbox_box_list = shift_bbox(50, 50, scale_bbox_array, scale_bbox_box_list);
+                    scale_shift_bbox_array, scale_shift_bbox_box_list = shift_bbox(50, 50, scale_bbox_array,
+                                                                                   scale_bbox_box_list);
                     scale_shift_bbox_patient_id = "{}-scale-shift-bbox-{}".format(patient_id, x)
-                    misc.imsave("{}/{}.png".format(scale_shift_bbox_dir, scale_shift_bbox_patient_id), scale_shift_bbox_array)
+                    misc.imsave("{}/{}.png".format(scale_shift_bbox_dir, scale_shift_bbox_patient_id),
+                                scale_shift_bbox_array)
                     final_box_map[scale_shift_bbox_patient_id] = scale_bbox_box_list
+                    final_captions_map[scale_shift_bbox_patient_id] = caption_map[patient_id]
+
                     # plot_image_and_bounding_boxes(scale_shift_bbox_array, scale_shift_bbox_box_list)
                     # flip image and save
                     flipped_scale_bbox_array, flipped_scale_shift_box_box_list = flip_image(scale_shift_bbox_array,
-                                                                                       scale_shift_bbox_box_list)
+                                                                                            scale_shift_bbox_box_list)
                     flipped_scale_shift_bbox_patient_id = "{}-scale-shift-bbox-flipped-{}".format(patient_id, x)
                     misc.imsave("{}/{}.png".format(scale_shift_bbox_dir, flipped_scale_shift_bbox_patient_id),
                                 flipped_scale_bbox_array)
                     final_box_map[flipped_scale_shift_bbox_patient_id] = flipped_scale_shift_box_box_list
+                    final_captions_map[flipped_scale_shift_bbox_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(scale_shift_bbox_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, scale_shift_bbox_dir))
 
     ################################
@@ -409,16 +436,23 @@ if __name__ == "__main__":
                     shifted_array, shifted_box_list = shift_image(10, 10, array, box_map[patient_id])
                     shift_shift_array, shift_shift_box_list = shift_bbox(50, 50, shifted_array, shifted_box_list)
                     shift_shift_patient_id = "{}-shift-shift-{}".format(patient_id, x)
-                    misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, shift_shift_patient_id), shift_shift_array)
+                    misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, shift_shift_patient_id),
+                                shift_shift_array)
                     final_box_map[shift_shift_patient_id] = shift_shift_box_list
+                    final_captions_map[shift_shift_patient_id] = caption_map[patient_id]
+
                     # plot_image_and_bounding_boxes(shift_shift_array, shift_shift_box_list)
                     # flip shifted image and save
-                    flipped_shift_shift_array, flipped_shift_shift_box_list = flip_image(shift_shift_array, shift_shift_box_list)
+                    flipped_shift_shift_array, flipped_shift_shift_box_list = flip_image(shift_shift_array,
+                                                                                         shift_shift_box_list)
                     flipped_patient_id = "{}-shift-shift-flipped-{}".format(patient_id, x)
-                    misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, flipped_patient_id), flipped_shift_shift_array)
+                    misc.imsave("{}/{}.png".format(shift_image_shift_bbox_dir, flipped_patient_id),
+                                flipped_shift_shift_array)
                     final_box_map[flipped_patient_id] = flipped_shift_shift_box_list
+                    final_captions_map[flipped_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(shift_image_shift_bbox_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, shift_image_shift_bbox_dir))
 
     ########################################
@@ -441,28 +475,45 @@ if __name__ == "__main__":
             if box_map[patient_id]:
                 for x in range(0, 5):
                     scale_image_array, scale_image_bbox_list = scale_image(0.625, array, box_map[patient_id])
-                    scale_scale_bbox_array, scale_scale_bbox_list = scale_bbox(.25, scale_image_array, scale_image_bbox_list)
-                    scale_scale_shift_bbox_array, scale_scale_shift_bbox_list = shift_bbox(50, 50, scale_scale_bbox_array, scale_scale_bbox_list)
+                    scale_scale_bbox_array, scale_scale_bbox_list = scale_bbox(.25, scale_image_array,
+                                                                               scale_image_bbox_list)
+                    scale_scale_shift_bbox_array, scale_scale_shift_bbox_list = shift_bbox(50, 50,
+                                                                                           scale_scale_bbox_array,
+                                                                                           scale_scale_bbox_list)
                     scale_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-{}".format(patient_id, x)
-                    misc.imsave("{}/{}.png".format(scale_image_scale_shift_bbox_dir, scale_scale_shift_bbox_patient_id), scale_scale_shift_bbox_array)
+                    misc.imsave("{}/{}.png".format(scale_image_scale_shift_bbox_dir, scale_scale_shift_bbox_patient_id),
+                                scale_scale_shift_bbox_array)
                     final_box_map[scale_scale_shift_bbox_patient_id] = scale_scale_shift_bbox_list
+                    final_captions_map[scale_scale_shift_bbox_patient_id] = caption_map[patient_id]
+
                     # plot_image_and_bounding_boxes(scale_scale_shift_bbox_array, scale_scale_shift_bbox_list)
                     # flip image and save
-                    flipped_scale_bbox_array, flipped_scale_shift_box_box_list = flip_image(scale_scale_shift_bbox_array,
-                                                                                            scale_scale_shift_bbox_list)
+                    flipped_scale_bbox_array, flipped_scale_shift_box_box_list = flip_image(
+                        scale_scale_shift_bbox_array,
+                        scale_scale_shift_bbox_list)
                     flipped_scale_shift_bbox_patient_id = "{}-scale-scale-shift-bbox-flipped-{}".format(patient_id, x)
-                    misc.imsave("{}/{}.png".format(scale_image_scale_shift_bbox_dir, flipped_scale_shift_bbox_patient_id),
-                                flipped_scale_bbox_array)
+                    misc.imsave(
+                        "{}/{}.png".format(scale_image_scale_shift_bbox_dir, flipped_scale_shift_bbox_patient_id),
+                        flipped_scale_bbox_array)
                     final_box_map[flipped_scale_shift_bbox_patient_id] = flipped_scale_shift_box_box_list
+                    final_captions_map[flipped_scale_shift_bbox_patient_id] = caption_map[patient_id]
 
     images_generated = len([name for name in os.listdir(scale_image_scale_shift_bbox_dir)])
+    total_images_generated += images_generated
     print("{} images generated in {}\n".format(images_generated, scale_image_scale_shift_bbox_dir))
 
-    generated_box_map_path = "./generated_box_map.json"
-    if os.path.exists(generated_box_map_path):
-        os.remove(generated_box_map_path)
+    object_annotation = "./object_annotation.json"
+    caption_annotation = "./caption_annotation.json"
 
-    with open('generated_box_map.json', 'w') as outfile:
+    if os.path.exists(object_annotation):
+        os.remove(object_annotation)
+
+    with open(object_annotation, 'w') as outfile:
         json.dump(final_box_map, outfile)
 
-    print("IMAGE GENERATION COMPLETE!!!")
+    with open(caption_annotation, 'w') as outfile:
+        json.dump(final_captions_map, outfile)
+
+    print("Total Images Generated: {}".format(total_images_generated))
+    print("Total in Captions Annotation JSON: {}".format(len(final_captions_map)))
+    print("Total in Object Annotation JSON: {}".format(len(final_box_map)))
