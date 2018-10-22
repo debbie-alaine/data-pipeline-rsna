@@ -15,7 +15,7 @@ import json
 def create_maps(filepath):
     box_map = defaultdict(lambda: [])
 
-    captions_map = defaultdict(lambda: [])
+    captions_map = {}
 
     with open(filepath, 'r') as csvfile:
         csv_reader = csv.reader(csvfile, delimiter=',')
@@ -32,7 +32,7 @@ def create_maps(filepath):
             if int(target):
                 box_map[patient_id].append([int(float(a)) for a in [x, y, width, height]])
 
-            captions_map[patient_id].append(target)
+            captions_map[patient_id] = target
 
         ## Print Map
         # for patient_id in box_map:
@@ -517,3 +517,4 @@ if __name__ == "__main__":
     print("Total Images Generated: {}".format(total_images_generated))
     print("Total in Captions Annotation JSON: {}".format(len(final_captions_map)))
     print("Total in Object Annotation JSON: {}".format(len(final_box_map)))
+    print("Finished. :) ")
