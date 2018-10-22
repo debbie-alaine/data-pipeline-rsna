@@ -1,6 +1,0 @@
-generated_images/
-training_data/
-training_data_set/
-.idea/
-generated_box_map.json
-stage_1_train_labels.csv
